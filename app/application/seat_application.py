@@ -6,10 +6,10 @@ from app.domain.seat_domain import Seat
 class SeatApplication:
     def __init__(self, seat_repository: SeatRepository):
         self.seat_repository = seat_repository
-        self.mutex = Lock()
+        self.mutex = Lock() # Un mutex para sincronizar las operaciones en hilos múltiples.
 
     def reserve_seat(self, row: int, seat_number: int) -> str:
-        with self.mutex:
+        with self.mutex: # Utilizamos el mutex para asegurarnos de que la cancelación sea segura en hilos múltiples.
             seat = Seat(row, seat_number)
             if self.seat_repository.is_seat_available(seat):
                 self.seat_repository.reserve_seat(seat)
@@ -18,7 +18,7 @@ class SeatApplication:
                 return 'Seat is already reserved or invalid.'
 
     def cancel_seat(self, row: int, seat_number: int) -> str:
-        with self.mutex:
+        with self.mutex: # Utilizamos el mutex para asegurarnos de que la cancelación sea segura en hilos múltiples.
             seat = Seat(row, seat_number)
             if self.seat_repository.is_seat_reserved(seat):
                 self.seat_repository.cancel_seat(seat)
