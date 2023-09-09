@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+
+# Logs and databases
+*.log
+*.db
+*.sqlite
+
+# Caches and other artifacts
+*.swp
+*.swo
+.DS_Store
+.vscode/
+.idea/
+
+# Environments
+.env
+.venv/
+venv/
+
+# Test-related
+coverage/
+test-results/
+
+# Docker-related
+Dockerfile~
+docker-compose.override.yml

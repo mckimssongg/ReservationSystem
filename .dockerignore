@@ -1,0 +1,17 @@
+# Archivos y directorios de Git
+.git
+.gitignore
+
+# Caché de Python
+__pycache__
+*.pyc
+*.pyo
+
+# Archivos y directorios de desarrollo
+.vscode/
+.idea/
+tests/
+
+# Otros archivos no deseados
+.DS_Store
+*.swp
