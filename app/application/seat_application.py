@@ -9,19 +9,19 @@ class SeatApplication:
         self.mutex = Lock() # Un mutex para sincronizar las operaciones en hilos múltiples.
 
     def reserve_seat(self, row: int, seat_number: int) -> str:
-        with self.mutex: # Utilizamos el mutex para asegurarnos de que la cancelación sea segura en hilos múltiples.
-            seat = Seat(row, seat_number)
-            if self.seat_repository.is_seat_available(seat):
-                self.seat_repository.reserve_seat(seat)
+        with self.mutex:
+            seat = self.seat_repository.load_seat(row, seat_number)  # Cargar el asiento desde la base de datos
+            if seat and seat.reserve():  # Utilizar el método del objeto del dominio
+                self.seat_repository.save_seat(seat)  # Guardar el estado en la base de datos
                 return 'Seat successfully reserved.'
             else:
                 return 'Seat is already reserved or invalid.'
 
     def cancel_seat(self, row: int, seat_number: int) -> str:
-        with self.mutex: # Utilizamos el mutex para asegurarnos de que la cancelación sea segura en hilos múltiples.
-            seat = Seat(row, seat_number)
-            if self.seat_repository.is_seat_reserved(seat):
-                self.seat_repository.cancel_seat(seat)
+        with self.mutex:
+            seat = self.seat_repository.load_seat(row, seat_number)  # Cargar el asiento desde la base de datos
+            if seat and seat.cancel():  # Utilizar el método del objeto del dominio
+                self.seat_repository.save_seat(seat)  # Guardar el estado en la base de datos
                 return 'Seat reservation successfully canceled.'
             else:
                 return 'Seat is not reserved or invalid.'

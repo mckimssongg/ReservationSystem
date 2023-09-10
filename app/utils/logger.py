@@ -1,6 +1,7 @@
 import os
 import logging
 from functools import wraps
+from flask import json
 
 class LoggerConfig:
     def __init__(self, file_name: str, log_folder: str = "logs"):
@@ -45,7 +46,27 @@ def log_decorator(logger, level="info"):
         def wrapper(*args, **kwargs):
             result = func(*args, **kwargs)
             log_message = f"Call to '{func.__name__}' > {result}"
+            
+            # Verificar si el contenido de la respuesta es de tipo JSON
+            is_json_response = result[0].content_type == 'application/json'
+            
+            # Obtener el contenido de la respuesta
+            response_content = result[0].get_data(as_text=True)
+            
+            # Si la respuesta es de tipo JSON, intentar decodificarla
+            if is_json_response:
+                try:
+                    json_content = json.loads(response_content)
+                except json.JSONDecodeError:
+                    json_content = "Invalid JSON"
+                log_message = f"Call to '{func.__name__}' > {result[1]} > {json_content}"
+            else:
+                pass
+                # Si no es JSON, usar el contenido tal como está
+                # json_content = response_content  
+            
             logger.log_message(log_message, level)
             return result
         return wrapper
     return decorator
+

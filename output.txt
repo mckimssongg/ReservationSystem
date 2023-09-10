@@ -1,0 +1,568 @@
+=== Directorio: .//app ===
+=== Directorio: .//app/application ===
+=== Archivo: .//app/application/__init__.py ===
+=== Directorio: .//app/application/__pycache__ ===
+=== Archivo: .//app/application/seat_application.py ===
+from threading import Lock
+from app.repository.seat_repository import SeatRepository
+from app.domain.seat_domain import Seat
+
+
+class SeatApplication:
+    def __init__(self, seat_repository: SeatRepository):
+        self.seat_repository = seat_repository
+        self.mutex = Lock() # Un mutex para sincronizar las operaciones en hilos múltiples.
+
+    def reserve_seat(self, row: int, seat_number: int) -> str:
+        with self.mutex:
+            seat = self.seat_repository.load_seat(row, seat_number)  # Cargar el asiento desde la base de datos
+            if seat and seat.reserve():  # Utilizar el método del objeto del dominio
+                self.seat_repository.save_seat(seat)  # Guardar el estado en la base de datos
+                return 'Seat successfully reserved.'
+            else:
+                return 'Seat is already reserved or invalid.'
+
+    def cancel_seat(self, row: int, seat_number: int) -> str:
+        with self.mutex:
+            seat = self.seat_repository.load_seat(row, seat_number)  # Cargar el asiento desde la base de datos
+            if seat and seat.cancel():  # Utilizar el método del objeto del dominio
+                self.seat_repository.save_seat(seat)  # Guardar el estado en la base de datos
+                return 'Seat reservation successfully canceled.'
+            else:
+                return 'Seat is not reserved or invalid.'
+
+    def get_seat_status(self, row: int, seat_number: int) -> str:
+        seat = Seat(row, seat_number)
+        if self.seat_repository.is_seat_reserved(seat):
+            return 'Seat is reserved.'
+        elif self.seat_repository.is_seat_available(seat):
+            return 'Seat is available.'
+        else:
+            return 'Seat is invalid.'
+        
+    def get_all_seats(self):
+        return self.seat_repository.get_all_seats()=== Directorio: .//app/domain ===
+=== Archivo: .//app/domain/__init__.py ===
+=== Directorio: .//app/domain/__pycache__ ===
+=== Archivo: .//app/domain/seat_domain.py ===
+from threading import Lock
+
+# Domain Model for Seat Reservation
+
+class Seat:
+    def __init__(self, row, number):
+        self.row = row
+        self.number = number
+        self.is_reserved = False
+        self.lock = Lock()
+
+    def reserve(self):
+        with self.lock:
+            if not self.is_reserved:
+                self.is_reserved = True
+                return True
+            return False
+
+    def cancel(self):
+        with self.lock:
+            if self.is_reserved:
+                self.is_reserved = False
+                return True
+            return False=== Directorio: .//app/infrastructure ===
+=== Archivo: .//app/infrastructure/__init__.py ===
+=== Directorio: .//app/infrastructure/__pycache__ ===
+=== Archivo: .//app/infrastructure/seat_routes.py ===
+from flask import Blueprint, jsonify, request
+from app.application.seat_application import SeatApplication
+from app.domain.seat_domain import Seat
+from app.repository.seat_repository import SeatRepository
+from ..utils.logger import LoggerConfig, log_decorator
+
+# Crear un Blueprint
+seat_routes = Blueprint('seat_routes', __name__)
+
+# Configuración de logger
+logger = LoggerConfig("SeatReservation")
+
+# Repositorio y aplicación de asientos
+seat_repository = SeatRepository()
+seat_application = SeatApplication(seat_repository)
+
+@seat_routes.route('/seats', methods=['GET'])
+@log_decorator(logger, level="info")
+def get_seats():
+    seats = seat_application.get_all_seats()
+    return jsonify(seats), 200
+
+@seat_routes.route('/reserve', methods=['POST'])
+@log_decorator(logger, level="info")
+def reserve_seat():
+    data = request.json
+    result = seat_application.reserve_seat(data['row'], data['number'])
+    return jsonify({'message': result}), 200
+
+@seat_routes.route('/cancel', methods=['POST'])
+@log_decorator(logger, level="info")
+def cancel_seat():
+    data = request.json
+    result = seat_application.cancel_seat(data['row'], data['number'])
+    return jsonify({'message': result}), 200
+=== Directorio: .//app/repository ===
+=== Archivo: .//app/repository/__init__.py ===
+=== Directorio: .//app/repository/__pycache__ ===
+=== Archivo: .//app/repository/seat_repository.py ===
+from sqlite3 import IntegrityError
+from app.domain.seat_domain import Seat
+from sqlalchemy import create_engine, Column, Integer, Boolean
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+Base = declarative_base()
+
+class SeatDB(Base):
+    __tablename__ = 'seats'
+
+    id = Column(Integer, primary_key=True, autoincrement=True, unique=True)
+    row = Column(Integer, nullable=False)
+    number = Column(Integer, nullable=False)
+    is_reserved = Column(Boolean, default=False)
+
+class SeatRepository:
+    def __init__(self, database_url='sqlite:///seats.db'):
+        self.engine = create_engine(database_url)
+        Base.metadata.create_all(self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+        self.initialize_seats()
+
+    # Método para verificar si un asiento está reservado
+    def is_seat_reserved(self, seat):
+        """
+        Verifica si un asiento está reservado.
+        :param seat: Un objeto de tipo Seat que representa el asiento.
+        :return: True si el asiento está reservado, False en caso contrario.
+        """
+        session = self.Session()
+        seat_db = session.query(SeatDB).filter_by(row=seat.row, number=seat.number).first()
+        session.close()
+
+        if seat_db and seat_db.is_reserved:
+            return True
+        return False
+
+    # Método para obtener un asiento específico
+    def get_seat(self, row, number):
+        """
+        Obtiene un asiento específico.
+        :param row: Número de fila del asiento.
+        :param number: Número del asiento dentro de la fila.
+        :return: El objeto del asiento si existe, None en caso contrario.
+        """
+        session = self.Session()
+        seat = session.query(SeatDB).filter_by(row=row, number=number).first()
+        session.close()
+        return seat
+
+    # Método para reservar un asiento
+    def reserve_seat(self, seat=None, row=None, number=None):
+        """
+        Reserva un asiento.
+        :param seat: Objeto del asiento a reservar.
+        :param row: Número de fila del asiento a reservar.
+        :param number: Número del asiento dentro de la fila a reservar.
+        :return: True si el asiento se reserva con éxito, False en caso contrario.
+        """
+        session = self.Session()
+        if seat:
+            target_seat = seat
+        elif row and number:
+            target_seat = self.get_seat(row, number)
+        else:
+            session.close()
+            raise ValueError("Debe proporcionar un objeto 'seat' o 'row' y 'number'.")
+        
+        if target_seat and not target_seat.is_reserved:
+            target_seat.is_reserved = True
+            session.commit()
+            session.close()
+            return True
+
+        session.close()
+        return False
+
+    # Método para cancelar la reserva de un asiento
+    def cancel_seat(self, seat=None, row=None, number=None):
+        """
+        Cancela la reserva de un asiento.
+        :param seat: Objeto del asiento a cancelar la reserva.
+        :param row: Número de fila del asiento a cancelar la reserva.
+        :param number: Número del asiento dentro de la fila a cancelar la reserva.
+        :return: True si la reserva del asiento se cancela con éxito, False en caso contrario.
+        """
+        session = self.Session()
+        if seat:
+            target_seat = seat
+        elif row and number:
+            target_seat = self.get_seat(row, number)
+        else:
+            session.close()
+            raise ValueError("Debe proporcionar un objeto 'seat' o 'row' y 'number'.")
+
+        if target_seat and target_seat.is_reserved:
+            target_seat.is_reserved = False
+            session.commit()
+            session.close()
+            return True
+
+        session.close()
+        return False
+
+    # Método para obtener todos los asientos
+    def get_all_seats(self):
+        """
+        Obtiene información de todos los asientos.
+        :return: Una lista de diccionarios con información de cada asiento.
+        """
+        session = self.Session()
+        seats = session.query(SeatDB).all()
+        session.close()
+        return [{"row": seat.row, "number": seat.number, "is_reserved": seat.is_reserved} for seat in seats]
+
+    # Método para verificar si un asiento está disponible
+    def is_seat_available(self, seat):
+        """
+        Verifica si un asiento está disponible para su reserva.
+        :param seat: Un objeto de tipo Seat que representa el asiento.
+        :return: True si el asiento está disponible, False en caso contrario.
+        """
+        session = self.Session()
+        seat_db = session.query(SeatDB).filter_by(row=seat.row, number=seat.number).first()
+        session.close()
+
+        if seat_db and not seat_db.is_reserved:
+            return True
+        return False
+    
+    # Método para cargar un asiento desde la base de datos
+    def load_seat(self, row, number):
+        session = self.Session()
+        seat_db = session.query(SeatDB).filter_by(row=row, number=number).first()
+        session.close()
+        if seat_db:
+            seat = Seat(seat_db.row, seat_db.number)
+            seat.is_reserved = seat_db.is_reserved
+            return seat
+        return None
+
+    # Método para guardar un asiento en la base de datos
+    def save_seat(self, seat):
+        session = self.Session()
+        try:
+            seat_db = session.query(SeatDB).filter_by(row=seat.row, number=seat.number).first()
+            if seat_db:
+                seat_db.is_reserved = seat.is_reserved
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error al guardar el asiento: {e}")
+        finally:
+            session.close()
+
+    def initialize_seats(self):
+        """
+        Inserta asientos iniciales en la base de datos.
+        """
+        session = self.Session()
+
+        # Verificar si ya hay asientos en la base de datos
+        existing_seats = session.query(SeatDB).first()
+        if existing_seats:
+            print("Los asientos ya están inicializados.")
+            session.close()
+            return
+        
+        # Asientos a insertar
+        seats_to_insert = [
+            SeatDB(row=1, number=1, is_reserved=False),
+            SeatDB(row=1, number=2, is_reserved=False),
+            SeatDB(row=1, number=3, is_reserved=False),
+            SeatDB(row=1, number=4, is_reserved=False),
+            SeatDB(row=1, number=5, is_reserved=False),
+            SeatDB(row=2, number=1, is_reserved=False),
+            SeatDB(row=2, number=2, is_reserved=False),
+            SeatDB(row=2, number=3, is_reserved=False),
+            SeatDB(row=2, number=4, is_reserved=False),
+            SeatDB(row=2, number=5, is_reserved=False),
+            SeatDB(row=3, number=1, is_reserved=False),
+            SeatDB(row=3, number=2, is_reserved=False),
+            SeatDB(row=3, number=3, is_reserved=False),
+            SeatDB(row=3, number=4, is_reserved=False),
+            SeatDB(row=3, number=5, is_reserved=False),
+            SeatDB(row=4, number=1, is_reserved=False),
+            SeatDB(row=4, number=2, is_reserved=False),
+            SeatDB(row=4, number=3, is_reserved=False),
+            SeatDB(row=4, number=4, is_reserved=False),
+            SeatDB(row=4, number=5, is_reserved=False),
+            SeatDB(row=5, number=1, is_reserved=False),
+            SeatDB(row=5, number=2, is_reserved=False),
+            SeatDB(row=5, number=3, is_reserved=False),
+            SeatDB(row=5, number=4, is_reserved=False),
+            SeatDB(row=5, number=5, is_reserved=False)
+        ]
+        
+        try:
+            for seat in seats_to_insert:
+                session.add(seat)
+            session.commit()
+            print("Asientos inicializados exitosamente.")
+        except IntegrityError:
+            session.rollback()
+            print("Algunos asientos ya existen. No se insertaron duplicados.")
+        finally:
+            session.close()=== Directorio: .//app/utils ===
+=== Archivo: .//app/utils/__init__.py ===
+=== Archivo: .//app/utils/logger.py ===
+import os
+import logging
+from functools import wraps
+from flask import json
+
+class LoggerConfig:
+    def __init__(self, file_name: str, log_folder: str = "logs"):
+        if not os.path.exists(log_folder):
+            os.makedirs(log_folder)
+            
+        file_path = os.path.join(log_folder, file_name + ".log")
+        
+        self.logger = logging.getLogger(file_name)
+        self.logger.setLevel(logging.DEBUG)
+        
+        formatter = logging.Formatter('%(asctime)s-%(levelname)s:%(message)s')
+        
+        file_handler = logging.FileHandler(file_path)
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.DEBUG)
+        
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        console_handler.setLevel(logging.DEBUG)
+        
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(console_handler)
+    
+    def log_message(self, message: str, level: str):
+        level = level.lower()
+        message = message.lower()
+        
+        if level not in ["info", "warning", "error"]:
+            raise ValueError("Invalid level")
+        
+        if level == "info":
+            self.logger.info(message)
+        elif level == "warning":
+            self.logger.warning(message)
+        elif level == "error":
+            self.logger.error(message)
+
+def log_decorator(logger, level="info"):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            result = func(*args, **kwargs)
+            log_message = f"Call to '{func.__name__}' > {result}"
+            
+            # Verificar si el contenido de la respuesta es de tipo JSON
+            is_json_response = result[0].content_type == 'application/json'
+            
+            # Obtener el contenido de la respuesta
+            response_content = result[0].get_data(as_text=True)
+            
+            # Si la respuesta es de tipo JSON, intentar decodificarla
+            if is_json_response:
+                try:
+                    json_content = json.loads(response_content)
+                except json.JSONDecodeError:
+                    json_content = "Invalid JSON"
+                log_message = f"Call to '{func.__name__}' > {result[1]} > {json_content}"
+            else:
+                pass
+                # Si no es JSON, usar el contenido tal como está
+                # json_content = response_content  
+            
+            logger.log_message(log_message, level)
+            return result
+        return wrapper
+    return decorator
+
+=== Directorio: .//app/utils/__pycache__ ===
+=== Archivo: .//create_app.py ===
+from flask import Flask
+from app.infrastructure.seat_routes import seat_routes
+
+def create_app():
+    app = Flask(__name__)
+    app.register_blueprint(seat_routes, url_prefix='/api/seat')
+    return app
+=== Archivo: .//docker-compose.yml ===
+version: '3'
+
+services:
+  seat-reservation-system:
+    build: .
+    ports:
+      - '5000:5000'
+    volumes:
+      - .:/app
+    environment:
+      - FLASK_ENV=development=== Archivo: .//Dockerfile ===
+# Usar una imagen base de Python 3.9
+FROM python:3.9
+
+# Establecer el directorio de trabajo en /app
+WORKDIR /app
+
+# Copiar el archivo de requisitos y instalar las dependencias
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar el directorio actual al contenedor en /app
+COPY . .
+
+# Comando para ejecutar la aplicación
+CMD ["python", "run.py"]
+=== Directorio: .//logs ===
+=== Archivo: .//output.txt ===
+=== Directorio: .//__pycache__ ===
+=== Archivo: .//README.md ===
+# Sistema de Reserva de Asientos
+
+## Descripción
+
+Este proyecto implementa un sistema de reserva de asientos para teatros o cines. La API permite a los usuarios reservar, cancelar y consultar el estado de los asientos.
+
+## Estructura del Proyecto
+
+```
+.
+├── app/                           # Carpeta principal de la aplicación
+│   ├── application/               # Lógica de la aplicación
+│   ├── domain/                    # Modelos de dominio
+│   ├── infrastructure/            # Rutas y controladores
+│   ├── repository/                # Repositorio y acceso a la base de datos
+│   └── utils/                     # Utilidades como el logger
+├── create_app.py                  # Archivo para crear y configurar la aplicación Flask
+├── docker-compose.yml             # Archivo de Docker Compose
+├── Dockerfile                     # Dockerfile
+├── logs/                          # Logs de la aplicación
+├── requirements.txt               # Dependencias del proyecto
+├── run.py                         # Archivo para ejecutar la aplicación
+└── test/                          # Tests de la aplicación
+```
+
+## Cómo levantar la API
+
+1. **Construir la imagen de Docker:**
+
+    ```bash
+    docker-compose build
+    ```
+
+2. **Levantar el contenedor:**
+
+    ```bash
+    docker-compose up
+    ```
+
+La API debería estar corriendo en `http://localhost:5000`.
+
+## Cómo correr los tests
+
+Para ejecutar los tests, puedes utilizar el siguiente comando desde la raíz del proyecto:
+
+```bash
+python -m unittest discover -s test/
+```
+
+## Logs
+
+Los logs de la aplicación se guardan en la carpeta "logs/".=== Archivo: .//requirements.txt ===
+Flask==2.0.1
+Flask-Cors==3.0.10
+SQLAlchemy==1.4.22
+Flask-SQLAlchemy==2.5.1
+requests==2.26.0=== Archivo: .//run.py ===
+from create_app import create_app
+
+app = create_app()
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+=== Directorio: .//test ===
+=== Directorio: .//test/__pycache__ ===
+=== Archivo: .//test/test_concurrency.py ===
+import requests
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
+import unittest
+import random
+
+# URL del servicio
+BASE_URL = "http://localhost:5000/api/seat"
+
+# Función para reservar un asiento
+def reserve_seat(row, number):
+    response = requests.post(f"{BASE_URL}/reserve", json={"row": row, "number": number})
+    return response.json()
+
+# Función para cancelar una reserva de asiento
+def cancel_seat(row, number):
+    response = requests.post(f"{BASE_URL}/cancel", json={"row": row, "number": number})
+    return response.json()
+
+# Función para obtener el estado de todos los asientos
+def get_seats():
+    response = requests.get(f"{BASE_URL}/seats")
+    return response.json()
+
+class TestSeatReservationSystem(unittest.TestCase):
+
+    def setUp(self):
+        pass # No es necesario hacer nada
+
+    def test_concurrent_reserve_seat(self):
+        with ThreadPoolExecutor() as executor:
+            # Realiza 5 reservas de asientos concurrentes aleatorios
+            random_seats = [(random.randint(1, 3), random.randint(1, 3)) for _ in range(5)]
+            future_to_seat = {executor.submit(reserve_seat, row, number): (row, number) for row, number in random_seats}
+            for future in concurrent.futures.as_completed(future_to_seat):
+                row, number = future_to_seat[future]
+                try:
+                    data = future.result()
+                    print(f"Asiento (Fila: {row}, Número: {number}) resultó en {data}")
+                    print("Estado de los asientos después de la reserva:")
+                    print(get_seats())
+                except Exception as exc:
+                    self.fail(f"La reserva del asiento (Fila: {row}, Número: {number}) generó una excepción: {exc}")
+
+    def test_concurrent_cancel_seat(self):
+        with ThreadPoolExecutor() as executor:
+            # Primero, reserva algunos asientos aleatorios
+            for i in range(3):
+                row = random.randint(1, 3)
+                number = random.randint(1, 3)
+                reserve_seat(row, number)
+
+            # Realiza 5 cancelaciones de asientos concurrentes aleatorios
+            random_seats = [(random.randint(1, 3), random.randint(1, 3)) for _ in range(5)]
+            future_to_seat = {executor.submit(cancel_seat, row, number): (row, number) for row, number in random_seats}
+            for future in concurrent.futures.as_completed(future_to_seat):
+                row, number = future_to_seat[future]
+                try:
+                    data = future.result()
+                    print(f"Asiento (Fila: {row}, Número: {number}) resultó en {data}")
+                    print("Estado de los asientos después de la cancelación:")
+                    print(get_seats())
+                except Exception as exc:
+                    self.fail(f"La cancelación del asiento (Fila: {row}, Número: {number}) generó una excepción: {exc}")
+
+if __name__ == '__main__':
+    unittest.main()
