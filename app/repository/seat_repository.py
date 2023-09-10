@@ -146,11 +146,10 @@ class SeatRepository:
         try:
             seat_db = session.query(SeatDB).filter_by(row=seat.row, number=seat.number).first()
             if seat_db:
-                seat_db.is_reserved = seat.is_reserved
+                session.query(SeatDB).filter_by(row=seat.row, number=seat.number).update({"is_reserved": seat.is_reserved})
                 session.commit()
         except Exception as e:
             session.rollback()
-            print(f"Error al guardar el asiento: {e}")
         finally:
             session.close()
 
@@ -163,7 +162,6 @@ class SeatRepository:
         # Verificar si ya hay asientos en la base de datos
         existing_seats = session.query(SeatDB).first()
         if existing_seats:
-            print("Los asientos ya están inicializados.")
             session.close()
             return
         
@@ -200,9 +198,7 @@ class SeatRepository:
             for seat in seats_to_insert:
                 session.add(seat)
             session.commit()
-            print("Asientos inicializados exitosamente.")
         except IntegrityError:
             session.rollback()
-            print("Algunos asientos ya existen. No se insertaron duplicados.")
         finally:
             session.close()
