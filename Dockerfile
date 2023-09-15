@@ -1,5 +1,8 @@
 # Usar una imagen base de Python 3.9
-FROM python:3.9
+FROM python:3.10-slim
+
+# Install core dependencies.
+RUN apt-get update && apt-get install -y libpq-dev build-essential
 
 # Establecer el directorio de trabajo en /app
 WORKDIR /app
